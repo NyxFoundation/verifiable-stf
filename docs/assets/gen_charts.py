@@ -9,7 +9,6 @@ docs/ir-trace-benchmark.md. Run from the repo root:
 Outputs four SVGs into docs/assets/.
 """
 
-import math
 import os
 from xml.sax.saxutils import escape
 
@@ -21,8 +20,6 @@ MUTED = "#6b7280"
 GRID = "#e5e7eb"
 LEAN = "#6b8afd"
 RUST = "#3ec9a7"
-OK = "#3ec9a7"
-OVER = "#ef5d5d"
 BAR = "#6b8afd"
 LIMIT = "#ef5d5d"
 
@@ -102,33 +99,38 @@ def chart_zkvm_cycles():
 
 
 def chart_trace_size_wall():
-    """Log-scale horizontal bar: ETH2 trace size against the input limit."""
-    W, H = 760, 256
-    px, py, pw = 150, 96, 540
-    lo, hi = 3.0, 10.0  # log10 bytes: 1 KB .. 10 GB
+    """Stacked fixed + per-validator decomposition of the trace, vs the input limit."""
+    W, H = 760, 340
+    px, py, pw = 150, 100, 520
+    gmax = 12.0  # GB
+    FIXED, PROP = BAR, "#f0a500"
+    fixed = 7.81
+    rows = [("V=1", 0.0327, "7.85"), ("V=10", 0.327, "8.14"), ("V=100", 3.27, "11.08")]
 
-    def lx(v):
-        return px + (math.log10(v) - lo) / (hi - lo) * pw
+    def wd(g):
+        return g / gmax * pw
 
     body = [
-        text(40, 34, "The trace-size wall (serialized bincode, log scale)", size=17, weight="600"),
-        text(40, 54, "The ETH2 STF trace blows past the input limit.", size=12, fill=MUTED),
+        text(40, 34, "Even one validator's trace busts the input limit", size=17, weight="600"),
+        text(40, 54, "The fixed ~7.81 GB structural term alone exceeds the ~4 GB limit at every V.", size=12, fill=MUTED),
+        legend(px, 78, [("fixed (structural)", FIXED), ("per-validator", PROP)]),
     ]
-    # x gridlines: 1KB,1MB,1GB,10GB
-    for expo, lab in [(3, "1 KB"), (6, "1 MB"), (9, "1 GB"), (10, "10 GB")]:
-        gx = lx(10 ** expo)
-        body.append(line(gx, py - 10, gx, py + 56, w=1))
-        body.append(text(gx, py + 74, lab, size=11, anchor="middle", fill=MUTED))
-    # bar
-    bh = 40
-    body.append(text(px - 16, py + bh / 2 + 4, "ETH2 STF", size=13, anchor="end"))
-    body.append(rect(px, py, lx(8.14e9) - px, bh, OVER))
-    body.append(text(lx(8.14e9) + 8, py + bh / 2 + 4, "8.14 GB", size=12, weight="600", fill=OVER))
-    # limit line at 2^32 bytes (~4 GB)
-    limit = 2 ** 32
-    lxp = lx(limit)
-    body.append(line(lxp, py - 14, lxp, py + 60, stroke=LIMIT, w=2, dash="5,4"))
-    body.append(text(lxp, py - 22, "~4 GB zkVM input limit", size=12, anchor="middle", fill=LIMIT, weight="600"))
+    # x gridlines (0..12 GB, every 3)
+    for g in range(0, 13, 3):
+        gx = px + wd(g)
+        body.append(line(gx, py - 6, gx, py + 206, w=1))
+        body.append(text(gx, py + 224, f"{g} GB", size=11, anchor="middle", fill=MUTED))
+    bh, gap = 44, 22
+    for i, (name, prop, total_lab) in enumerate(rows):
+        by = py + i * (bh + gap)
+        body.append(text(px - 16, by + bh / 2 + 4, name, size=13, anchor="end"))
+        body.append(rect(px, by, wd(fixed), bh, FIXED))
+        body.append(rect(px + wd(fixed), by, wd(prop), bh, PROP))
+        body.append(text(px + wd(fixed + prop) + 8, by + bh / 2 + 4, f"{total_lab} GB", size=12, weight="600", fill=INK))
+    # 4 GB input limit
+    lx = px + wd(4.0)
+    body.append(line(lx, py - 12, lx, py + 206, stroke=LIMIT, w=2, dash="5,4"))
+    body.append(text(lx, py - 20, "~4 GB input limit", size=12, anchor="middle", fill=LIMIT, weight="600"))
     write("bench-trace-size-wall.svg", svg(W, H, "".join(body)))
 
 
@@ -160,40 +162,45 @@ def chart_step_composition():
 
 
 def chart_scaling():
-    """Vertical bars: per-metric growth ratio from N=10 to N=100 (1.0x = no growth)."""
-    W, H = 760, 400
-    px, py, pw, ph = 80, 86, 640, 250
-    axis_max = 2.0
-    metrics = [
-        ("Total steps", 1.36),
-        ("Wall time", 1.45),
-        ("Value table", 1.36),
-        ("PrimResult", 1.57),
-        ("Output size", 1.17),
-    ]
+    """Affine fit: serialized trace size (GB) vs validator count."""
+    W, H = 760, 430
+    px, py, pw, ph = 84, 92, 596, 268
+    vmax, gmax = 105.0, 12.0  # validators, GB
+    fixed, slope_gb = 7.81, 0.0327  # GB, GB/validator
+
+    def X(v):
+        return px + v / vmax * pw
+
+    def Y(g):
+        return py + ph - g / gmax * ph
+
     body = [
-        text(px, 34, "Scaling: how each metric grows from N=10 to N=100", size=17, weight="600"),
-        text(px, 54, "Validators grew 10x; recorded work grows far more slowly.", size=12, fill=MUTED),
+        text(px, 34, "Serialized trace size is affine in validator count", size=17, weight="600"),
+        text(px, 54, "~7.81 GB fixed + ~32.7 MB/validator. The whole line sits above the ~4 GB input limit.", size=12, fill=MUTED),
     ]
-    for i in range(5):
-        v = i * 0.5
-        gy = py + ph - v / axis_max * ph
+    # y gridlines (0..12 GB, every 3)
+    for g in range(0, 13, 3):
+        gy = Y(g)
         body.append(line(px, gy, px + pw, gy))
-        body.append(text(px - 10, gy + 4, f"{v:.1f}x", size=11, anchor="end", fill=MUTED))
-    # 1.0x reference (no-growth) line
-    ry = py + ph - 1.0 / axis_max * ph
-    body.append(line(px, ry, px + pw, ry, stroke=MUTED, w=1.4, dash="5,4"))
-    body.append(text(px + pw, ry - 6, "1.0x (no growth)", size=11, anchor="end", fill=MUTED))
-    n = len(metrics)
-    slot = pw / n
-    bw = 64
-    for i, (name, ratio) in enumerate(metrics):
-        bx = px + i * slot + (slot - bw) / 2
-        bh = ratio / axis_max * ph
-        by = py + ph - bh
-        body.append(rect(bx, by, bw, bh, BAR))
-        body.append(text(bx + bw / 2, by - 8, f"{ratio}x", size=12, anchor="middle", weight="600"))
-        body.append(text(bx + bw / 2, py + ph + 22, name, size=12, anchor="middle"))
+        body.append(text(px - 10, gy + 4, f"{g} GB", size=11, anchor="end", fill=MUTED))
+    # x ticks
+    for v in (0, 25, 50, 75, 100):
+        body.append(text(X(v), py + ph + 22, str(v), size=11, anchor="middle", fill=MUTED))
+    body.append(text(px + pw / 2, py + ph + 44, "validators (V)", size=12, anchor="middle", fill=MUTED))
+    # 4 GB input limit
+    ly = Y(4.0)
+    body.append(line(px, ly, px + pw, ly, stroke=LIMIT, w=2, dash="5,4"))
+    body.append(text(px + pw, ly - 7, "~4 GB input limit", size=12, anchor="end", fill=LIMIT, weight="600"))
+    # fitted line V=0..100
+    body.append(line(X(0), Y(fixed), X(100), Y(fixed + slope_gb * 100), stroke=BAR, w=2.5))
+    body.append(text(X(0) + 8, Y(fixed) - 18, "7.81 GB fixed (V=0)", size=11, fill=BAR, weight="600"))
+    body.append(text(X(100), Y(fixed + slope_gb * 100) - 10, "≈11.1 GB (est.)", size=11, anchor="end", fill=MUTED))
+    # measured points
+    for v, g in [(1, 7.85), (2, 7.88), (3, 7.91), (10, 8.14)]:
+        body.append(f'<circle cx="{X(v):.1f}" cy="{Y(g):.1f}" r="4.5" fill="{INK}"/>')
+    body.append(text(X(10) + 12, Y(8.14) + 26, "measured V=1,2,3,10", size=11, anchor="start", fill=INK))
+    # axes
+    body.append(line(px, py, px, py + ph, stroke=MUTED, w=1.2))
     body.append(line(px, py + ph, px + pw, py + ph, stroke=MUTED, w=1.2))
     write("bench-scaling.svg", svg(W, H, "".join(body)))
 
