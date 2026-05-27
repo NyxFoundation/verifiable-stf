@@ -102,8 +102,8 @@ def chart_zkvm_cycles():
 
 
 def chart_trace_size_wall():
-    """Log-scale horizontal bars: sum trace vs ETH2 trace, with the input limit."""
-    W, H = 760, 320
+    """Log-scale horizontal bar: ETH2 trace size against the input limit."""
+    W, H = 760, 256
     px, py, pw = 150, 96, 540
     lo, hi = 3.0, 10.0  # log10 bytes: 1 KB .. 10 GB
 
@@ -112,25 +112,22 @@ def chart_trace_size_wall():
 
     body = [
         text(40, 34, "The trace-size wall (serialized bincode, log scale)", size=17, weight="600"),
-        text(40, 54, "Sum example fits easily; the ETH2 STF trace blows past the input limit.", size=12, fill=MUTED),
+        text(40, 54, "The ETH2 STF trace blows past the input limit.", size=12, fill=MUTED),
     ]
     # x gridlines: 1KB,1MB,1GB,10GB
     for expo, lab in [(3, "1 KB"), (6, "1 MB"), (9, "1 GB"), (10, "10 GB")]:
         gx = lx(10 ** expo)
-        body.append(line(gx, py - 10, gx, py + 120, w=1))
-        body.append(text(gx, py + 138, lab, size=11, anchor="middle", fill=MUTED))
-    # bars
-    bars = [("sum example", 3843, "3.8 KB", OK), ("ETH2 STF", 8.14e9, "8.14 GB", OVER)]
+        body.append(line(gx, py - 10, gx, py + 56, w=1))
+        body.append(text(gx, py + 74, lab, size=11, anchor="middle", fill=MUTED))
+    # bar
     bh = 40
-    for i, (name, val, lab, color) in enumerate(bars):
-        by = py + i * 64
-        body.append(text(px - 16, by + bh / 2 + 4, name, size=13, anchor="end"))
-        body.append(rect(px, by, lx(val) - px, bh, color))
-        body.append(text(lx(val) + 8, by + bh / 2 + 4, lab, size=12, weight="600", fill=color))
+    body.append(text(px - 16, py + bh / 2 + 4, "ETH2 STF", size=13, anchor="end"))
+    body.append(rect(px, py, lx(8.14e9) - px, bh, OVER))
+    body.append(text(lx(8.14e9) + 8, py + bh / 2 + 4, "8.14 GB", size=12, weight="600", fill=OVER))
     # limit line at 2^32 bytes (~4 GB)
     limit = 2 ** 32
     lxp = lx(limit)
-    body.append(line(lxp, py - 14, lxp, py + 124, stroke=LIMIT, w=2, dash="5,4"))
+    body.append(line(lxp, py - 14, lxp, py + 60, stroke=LIMIT, w=2, dash="5,4"))
     body.append(text(lxp, py - 22, "~4 GB zkVM input limit", size=12, anchor="middle", fill=LIMIT, weight="600"))
     write("bench-trace-size-wall.svg", svg(W, H, "".join(body)))
 

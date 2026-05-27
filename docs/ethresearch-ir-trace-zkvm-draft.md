@@ -24,7 +24,7 @@ tags:
 ## TL;DR
 
 - We wrote an Ethereum consensus **state transition function (STF) in Lean 4** and explored three ways to get a zk proof of its execution inside a RISC Zero zkVM: compile Lean→RISC-V, compile Rust→RISC-V (baseline), and a third **"IR Trace"** approach that needs no Lean→RISC-V toolchain.
-- In the **IR Trace** approach the host *interprets* Lean's lambda-RC (λRC) IR and records an execution trace; the zkVM guest is a tiny program that **re-checks each trace step**. A toy `sum` program proves end-to-end at **653,173 cycles**.
+- In the **IR Trace** approach the host *interprets* Lean's lambda-RC (λRC) IR and records an execution trace; the zkVM guest is a tiny program that **re-checks each trace step**.
 - For the real ETH2 STF, **host-side trace generation completes**, but the trace is **8.14 GB** (serialized bincode) — over the input-path limit we hit in this implementation — so the ETH2 STF has **not** yet been executed or proven in-guest.
 - We're sharing the numbers and the wall we hit, and **asking for feedback** on trace-compression directions (and on whether interpret-then-verify is the right shape at all).
 
@@ -148,28 +148,13 @@ Scaling from N=10 → N=100:
 
 `PrimResult` (arithmetic) scales the steepest, as expected from per-validator balance/epoch math.
 
-### IR Trace — the `sum` example proves end-to-end
-
-A toy `sum` program with scalar input works through the full pipeline:
-
-```
-Mode:         execute
-Trace:        3,843 bytes (bincode)
-User cycles:  653,173
-Segments:     1
-Wall time:    76.18ms
-Output:       8 bytes (Success)
-```
-
-This is the existence proof that the architecture is sound in shape: tiny guest, host-generated trace, re-checked end-to-end.
-
 ## The wall: trace size
 
 The ETH2 STF generates a trace on the host, but it is **8.14 GB** (serialized bincode), with **639,836** value-table entries. We cannot feed it to the guest: the input path in this implementation serializes a `Vec<u8>` via `env::write()` with a **u32 length prefix**, and the host hits a `TryFromIntError` at ~4 GB.
 
 > We state this as the **input-path limit observed in this implementation**, not as an authoritative RISC Zero spec figure.
 
-![Trace size on a log scale: the sum example is 3.8 KB and fits easily, while the ETH2 STF trace is 8.14 GB, past the ~4 GB zkVM input limit.](assets/bench-trace-size-wall.svg)
+![Trace size on a log scale: the ETH2 STF trace is 8.14 GB, past the ~4 GB zkVM input limit.](assets/bench-trace-size-wall.svg)
 
 Why is the trace so large? The interpreter clones **every intermediate value** into the value table, and ETH2 intermediates include large `ByteArray`s (the beacon state is ~78 KB) and deeply nested `Object`s, many of them near-duplicates (e.g. a byte array modified at a single index becomes a full new copy). Switching the trace format from JSON (~15 GB) to bincode (8.14 GB) only bought ~1.8×, because the cost is dominated by serializing complex nested values, not by JSON syntax overhead.
 
@@ -212,7 +197,7 @@ just filter-ir
 # Host interpreter benchmark across validator counts
 just bench-ir-trace 10,100
 
-# End-to-end zkVM execute path (sum example works; ETH2 is blocked by trace size)
+# End-to-end zkVM execute path (ETH2 is blocked by trace size)
 just verify-ir-trace /tmp/eth2_input_10.bin
 ```
 
