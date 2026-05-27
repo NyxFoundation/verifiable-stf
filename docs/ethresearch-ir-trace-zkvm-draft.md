@@ -73,23 +73,34 @@ The verifier re-checks trace steps as follows:
 
 ## Benchmark results
 
-### Three-approach comparison
+A caveat up front: **the three approaches do not share a single cost metric.** Only the *workload* and the *output* are directly comparable across all three; zkVM cycles exist only for the compiled approaches, and the host-interpreter statistics exist only for IR Trace. So we report in three buckets rather than one misleading table.
 
-zkVM cycles and segments, ETH2 STF, N validators:
+### 1. Common axis — workload and output size (all three)
+
+All three run the **same Lean-specified ETH2 STF on the same inputs** (N=10 and N=100 validators). The only directly-comparable *result* is the serialized output size:
+
+| Output size | N=10 | N=100 |
+|-------------|------|-------|
+| Lean (compiled) | 78,746 B | 91,976 B |
+| Rust (compiled) | 78,746 B | 91,976 B |
+| IR Trace | 78,522 B | 91,752 B |
+
+IR Trace is **224 bytes smaller** at both N. We attribute this to a difference in the test-input serializer driving the interpreter versus the compiled guests, **not** to a divergence in the STF itself — but we flag it as not-yet-reconciled.
+
+### 2. Compiled approaches only — zkVM cost
+
+zkVM cycles and segments exist **only for the two compiled approaches**. IR Trace's ETH2 zkVM verification is **N/A — blocked by trace size** (see "The wall" below), so there is no apples-to-apples cycle figure for it on ETH2; do not read its absence as "fast."
 
 | Approach | N=10 cycles | N=10 seg | N=100 cycles | N=100 seg |
 |----------|-------------|----------|--------------|-----------|
 | Lean (compiled, incl. `Init`) | 26,148,291 | 29 | 35,281,299 | 38 |
 | Rust (compiled, baseline) | 12,491,509 | 13 | 14,446,747 | 15 |
-| **IR Trace (zkVM verify)** | **N/A — blocked by trace size** | **N/A** | **N/A** | **N/A** |
 
 ![zkVM cycles: compiled Lean vs Rust at N=10 and N=100. Rust is roughly half of Lean's cycle count; IR Trace zkVM verification is not available, blocked by trace size.](assets/bench-zkvm-cycles.svg)
 
-The IR Trace row is **not** blank because it's small — it is **unmeasurable** at present: the trace cannot be fed to the guest (see "The wall" below). Do not read it as comparable to the Lean/Rust cycle counts.
+### 3. IR Trace only — host-interpreter statistics
 
-### IR Trace — host interpreter (these are host stats, not zkVM cycles)
-
-The numbers below are **host wall-clock time and step counts** from interpreting the IR. They are *not* zkVM cycles and should not be compared to the guest-cycle table above.
+These have **no analogue** in the compiled guests: they are host wall-clock time and step counts from interpreting the IR — *not* zkVM cycles, and not to be compared with the cycle table above.
 
 N=10 (median of 3 runs):
 
@@ -136,8 +147,6 @@ Scaling from N=10 → N=100:
 ![Growth ratio of each metric from N=10 to N=100, against a 1.0x no-growth reference: total steps 1.36x, wall time 1.45x, value table 1.36x, PrimResult 1.57x, output size 1.17x.](assets/bench-scaling.svg)
 
 `PrimResult` (arithmetic) scales the steepest, as expected from per-validator balance/epoch math.
-
-A consistency note: IR Trace outputs are **224 bytes smaller** than the compiled Lean/Rust outputs at both N (78,522 B vs 78,746 B; 91,752 B vs 91,976 B). We attribute this to a difference in the test-input serializer used to drive the interpreter versus the compiled guests, not to a divergence in the STF itself — but we flag it as not-yet-reconciled.
 
 ### IR Trace — the `sum` example proves end-to-end
 
