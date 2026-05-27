@@ -11,7 +11,13 @@ tags:
 
 <!-- ethresear.ch post body starts below. Do NOT paste the YAML frontmatter above
      into Discourse — it is repo metadata only and will not render. Copy from the
-     H1 heading onward. Replace [link to repo] before posting. -->
+     H1 heading onward. Replace [link to repo] before posting.
+
+     Figures are SVGs in docs/assets/. On GitHub the relative image links render
+     as-is. For ethresear.ch, upload each figure to the post (if your Discourse
+     instance rejects SVG uploads, export the SVG to PNG first — e.g. open it in
+     a browser and "Save as", or run `rsvg-convert in.svg -o out.png`) and swap
+     the image links for the uploaded URLs. -->
 
 # Verifying a Lean-specified Ethereum STF in a zkVM by interpreting IR and proving the trace
 
@@ -77,6 +83,8 @@ zkVM cycles and segments, ETH2 STF, N validators:
 | Rust (compiled, baseline) | 12,491,509 | 13 | 14,446,747 | 15 |
 | **IR Trace (zkVM verify)** | **N/A — blocked by trace size** | **N/A** | **N/A** | **N/A** |
 
+![zkVM cycles: compiled Lean vs Rust at N=10 and N=100. Rust is roughly half of Lean's cycle count; IR Trace zkVM verification is not available, blocked by trace size.](assets/bench-zkvm-cycles.svg)
+
 The IR Trace row is **not** blank because it's small — it is **unmeasurable** at present: the trace cannot be fed to the guest (see "The wall" below). Do not read it as comparable to the Lean/Rust cycle counts.
 
 ### IR Trace — host interpreter (these are host stats, not zkVM cycles)
@@ -97,6 +105,8 @@ Trace steps:  238,049
 Value table:  639,836 entries
 Output:       78,522 bytes (Success)
 ```
+
+![IR-trace step composition at N=10: PrimResult 42.2%, Call 21.5%, ProjResult 16.7%, Branch 11.4%, CtorCreate 4.6%, SetResult 3.7%, of 238,049 total steps.](assets/bench-step-composition.svg)
 
 N=100 (median of 3 runs):
 
@@ -123,6 +133,8 @@ Scaling from N=10 → N=100:
 | PrimResult steps | 100,490 | 157,376 | 1.57× |
 | Output size | 78,522 B | 91,752 B | 1.17× |
 
+![Growth ratio of each metric from N=10 to N=100, against a 1.0x no-growth reference: total steps 1.36x, wall time 1.45x, value table 1.36x, PrimResult 1.57x, output size 1.17x.](assets/bench-scaling.svg)
+
 `PrimResult` (arithmetic) scales the steepest, as expected from per-validator balance/epoch math.
 
 A consistency note: IR Trace outputs are **224 bytes smaller** than the compiled Lean/Rust outputs at both N (78,522 B vs 78,746 B; 91,752 B vs 91,976 B). We attribute this to a difference in the test-input serializer used to drive the interpreter versus the compiled guests, not to a divergence in the STF itself — but we flag it as not-yet-reconciled.
@@ -147,6 +159,8 @@ This is the existence proof that the architecture is sound in shape: tiny guest,
 The ETH2 STF generates a trace on the host, but it is **8.14 GB** (serialized bincode), with **639,836** value-table entries. We cannot feed it to the guest: the input path in this implementation serializes a `Vec<u8>` via `env::write()` with a **u32 length prefix**, and the host hits a `TryFromIntError` at ~4 GB.
 
 > We state this as the **input-path limit observed in this implementation**, not as an authoritative RISC Zero spec figure.
+
+![Trace size on a log scale: the sum example is 3.8 KB and fits easily, while the ETH2 STF trace is 8.14 GB, past the ~4 GB zkVM input limit.](assets/bench-trace-size-wall.svg)
 
 Why is the trace so large? The interpreter clones **every intermediate value** into the value table, and ETH2 intermediates include large `ByteArray`s (the beacon state is ~78 KB) and deeply nested `Object`s, many of them near-duplicates (e.g. a byte array modified at a single index becomes a full new copy). Switching the trace format from JSON (~15 GB) to bincode (8.14 GB) only bought ~1.8×, because the cost is dominated by serializing complex nested values, not by JSON syntax overhead.
 
