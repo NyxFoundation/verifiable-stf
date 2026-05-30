@@ -1,6 +1,6 @@
 ---
 title: "Verifying a Lean-specified Ethereum STF in a zkVM by interpreting IR and proving the trace"
-last_updated: 2026-05-28
+last_updated: 2026-05-30
 tags:
   - zkvm
   - lean
@@ -58,6 +58,22 @@ host driver  ──  hashes IR + input, feeds {ir_hash, input, trace} to the zkV
    ▼
 zkVM guest  ──  re-verifies each trace step, commits the output hash
 ```
+
+### Host-side interpreter: an independent reimplementation of the official C++ λRC interpreter
+
+It is worth being precise about what the "host interpreter" actually is.
+
+Lean 4 ships an official C++ λRC interpreter, [`src/library/ir_interpreter.cpp`](https://github.com/leanprover/lean4/blob/master/src/library/ir_interpreter.cpp), for environments where LLVM JIT is unavailable (e.g. WebAssembly). This is the reference implementation that defines the semantics of λRC IR. We could not use it directly for two reasons: (1) it is C++ and does not integrate with the Rust/RISC Zero ecosystem, and (2) it only *executes* — it has no mechanism to record per-step intermediate values into a structured trace.
+
+We therefore built an **independent Rust reimplementation** from the same λRC IR spec ([`Lean/Compiler/IR/Basic.lean`](https://github.com/leanprover/lean4/blob/master/src/Lean/Compiler/IR/Basic.lean)) with trace emit wired in. This is not a transliteration of the C++; it is a from-scratch implementation of the same spec. Three intentional differences:
+
+1. **Reference-counting ops replaced with clones.** `Inc` / `Dec` / `Del` instructions normally manipulate Lean's runtime refcount for memory management. Inside the zkVM there is no GC and no memory reuse, so we read them as `clone()`. The semantics are equivalent; the performance profile is not (clone consumes more memory, but this has no effect on guest-side verification).
+
+2. **In-place optimisation ops (`Reset` / `Reuse`) elided.** λRC's `Reset` / `Reuse` are compiler-generated optimisations that reclaim memory when the refcount is exactly 1. They have no semantic effect, so we dropped them.
+
+3. **`dlsym` native dispatch replaced with extern stubs.** The C++ interpreter calls crypto primitives (`blsVerify`, `hashTreeRoot`, etc.) via `dlsym`. Our Rust reimplementation defines these as static extern stubs that return their recorded results — they are not re-executed in the zkVM guest (see "What the guest actually checks").
+
+As a consequence, when this post says "we ran the Lean program", it means "we ran the λRC IR through this independent Rust reimplementation" — **bit-for-bit equivalence with Lean's own C++ interpreter is not established**. The coverage gap for in-place mutation ops (`USet` / `SSet` / `SetTag`) is detailed in "What the guest actually checks."
 
 ## What the guest actually checks
 
@@ -169,7 +185,7 @@ Contrast with **compiled Lean**: there, intermediates live in paged zkVM memory 
 
 This is a research prototype; some gaps matter for soundness and we want to be upfront:
 
-1. **Not a faithful port of Lean's runtime.** Values, the stack/frame model, and native/extern dispatch are a Rust re-implementation that approximates Lean semantics for this workload, not Lean's actual runtime.
+1. **The host interpreter is an independent reimplementation of the official C++ λRC interpreter ([`ir_interpreter.cpp`](https://github.com/leanprover/lean4/blob/master/src/library/ir_interpreter.cpp)), not a faithful port.** Bit-for-bit equivalence with Lean's own runtime is not established. See "The three approaches → Host-side interpreter" for the three intentional differences.
 2. **Crypto is stubbed and trusted** (`hashTreeRoot`, `blsVerify`, …), as noted above.
 3. **Trace coverage is incomplete for in-place mutations.** Be careful here, because it's easy to overstate what's checked: the `Set` field-update op *does* emit a re-checked `SetResult` step. But the in-place mutation ops `USet` / `SSet` / `SetTag` are **executed by the interpreter yet emit no trace step today**, so they currently fall **outside** the verified set. Closing this gap is required before any ETH2 proof would be meaningful.
 
