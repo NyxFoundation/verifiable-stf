@@ -3,11 +3,12 @@ use ir_trace_common::trace_types::{TraceStep, ValueId};
 use crate::ir_types::{Arg, Expr, IRType, LitValue};
 use super::stack::CallFrame;
 use super::value::Value;
+use super::ValueRegistry;
 
 pub struct ExprEvaluator<'a> {
     pub frame: &'a mut CallFrame,
     pub trace_steps: &'a mut Vec<TraceStep>,
-    pub value_table: &'a mut Vec<Value>,
+    pub value_registry: &'a mut ValueRegistry,
 }
 
 impl<'a> ExprEvaluator<'a> {
@@ -16,12 +17,6 @@ impl<'a> ExprEvaluator<'a> {
             Arg::Var(v) => self.frame.get_var(*v).clone(),
             Arg::Irrelevant => Value::Irrelevant,
         }
-    }
-
-    pub fn register_value(&mut self, val: &Value) -> ValueId {
-        let id = self.value_table.len() as ValueId;
-        self.value_table.push(val.clone());
-        id
     }
 
     pub fn eval_with_ty(&mut self, expr: &Expr, ty: &IRType) -> Value {
@@ -50,11 +45,11 @@ impl<'a> ExprEvaluator<'a> {
                 };
                 let field_ids: Vec<ValueId> = match &val {
                     Value::Object { fields, .. } => {
-                        fields.iter().map(|f| self.register_value(f)).collect()
+                        fields.iter().map(|f| self.value_registry.register(f)).collect()
                     }
                     _ => vec![],
                 };
-                let result_id = self.register_value(&val);
+                let result_id = self.value_registry.register(&val);
                 self.trace_steps.push(TraceStep::CtorCreate {
                     tag: info.cidx,
                     fields: field_ids,
@@ -69,8 +64,8 @@ impl<'a> ExprEvaluator<'a> {
             Expr::Proj { idx, var } => {
                 let obj = self.frame.get_var(*var).clone();
                 let field = obj.field(*idx as usize).clone();
-                let obj_id = self.register_value(&obj);
-                let result_id = self.register_value(&field);
+                let obj_id = self.value_registry.register(&obj);
+                let result_id = self.value_registry.register(&field);
                 self.trace_steps.push(TraceStep::ProjResult {
                     obj: obj_id,
                     idx: *idx as u16,

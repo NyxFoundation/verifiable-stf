@@ -1,15 +1,16 @@
-use ir_trace_common::trace_types::{TraceStep, ValueId};
+use ir_trace_common::trace_types::TraceStep;
 
 use crate::ir_types::{Alt, Arg, FnBody, IRType};
 
 use super::eval_expr::ExprEvaluator;
 use super::stack::CallFrame;
 use super::value::Value;
+use super::ValueRegistry;
 
 pub struct BodyExecutor<'a> {
     pub frame: &'a mut CallFrame,
     pub trace_steps: &'a mut Vec<TraceStep>,
-    pub value_table: &'a mut Vec<Value>,
+    pub value_registry: &'a mut ValueRegistry,
 }
 
 impl<'a> BodyExecutor<'a> {
@@ -20,12 +21,6 @@ impl<'a> BodyExecutor<'a> {
         }
     }
 
-    fn register_value(&mut self, val: &Value) -> ValueId {
-        let id = self.value_table.len() as ValueId;
-        self.value_table.push(val.clone());
-        id
-    }
-
     fn eval_expr_inline_with_ty(
         &mut self,
         expr: &crate::ir_types::Expr,
@@ -34,7 +29,7 @@ impl<'a> BodyExecutor<'a> {
         let mut evaluator = ExprEvaluator {
             frame: self.frame,
             trace_steps: self.trace_steps,
-            value_table: self.value_table,
+            value_registry: self.value_registry,
         };
         evaluator.eval_with_ty(expr, ty)
     }
@@ -110,10 +105,10 @@ impl<'a> BodyExecutor<'a> {
             } => {
                 let mut obj = self.frame.get_var(*var).clone();
                 let new_val = self.resolve_arg(val);
-                let obj_id = self.register_value(&obj);
-                let val_id = self.register_value(&new_val);
+                let obj_id = self.value_registry.register(&obj);
+                let val_id = self.value_registry.register(&new_val);
                 obj.set_field(*idx as usize, new_val);
-                let result_id = self.register_value(&obj);
+                let result_id = self.value_registry.register(&obj);
                 self.trace_steps.push(TraceStep::SetResult {
                     obj: obj_id,
                     idx: *idx as u16,
@@ -170,7 +165,7 @@ impl<'a> BodyExecutor<'a> {
             } => {
                 let val = self.frame.get_var(*scrutinee).clone();
                 let tag = val.tag();
-                let scrutinee_id = self.register_value(&val);
+                let scrutinee_id = self.value_registry.register(&val);
                 self.trace_steps.push(TraceStep::Branch {
                     scrutinee: scrutinee_id,
                     chosen_tag: tag,

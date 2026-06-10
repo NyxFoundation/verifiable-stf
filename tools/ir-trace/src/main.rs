@@ -104,7 +104,7 @@ fn run_bench(
         durations.push(elapsed);
         eprintln!("  Run {}/{}: {:.3}s", run_idx + 1, args.runs, elapsed.as_secs_f64());
 
-        last_value_count = interp.value_table.len();
+        last_value_count = interp.value_registry.table.len();
         if run_idx == 0 {
             last_steps = std::mem::take(&mut interp.trace_steps);
         }
@@ -117,7 +117,6 @@ fn run_bench(
     let max = durations[durations.len() - 1];
 
     // Count step categories
-    let mut call_count = 0u64;
     let mut branch_count = 0u64;
     let mut prim_count = 0u64;
     let mut ctor_count = 0u64;
@@ -125,7 +124,6 @@ fn run_bench(
     let mut set_count = 0u64;
     for step in &last_steps {
         match step {
-            TraceStep::Call { .. } => call_count += 1,
             TraceStep::Branch { .. } => branch_count += 1,
             TraceStep::PrimResult { .. } => prim_count += 1,
             TraceStep::CtorCreate { .. } => ctor_count += 1,
@@ -148,7 +146,6 @@ fn run_bench(
     eprintln!();
     eprintln!("=== Trace Steps ===");
     eprintln!("  Total:      {:>10}", format_count(total_steps));
-    eprintln!("  Call:        {:>10} ({:.1}%)", format_count(call_count), pct(call_count, total_steps));
     eprintln!("  Branch:      {:>10} ({:.1}%)", format_count(branch_count), pct(branch_count, total_steps));
     eprintln!("  PrimResult:  {:>10} ({:.1}%)", format_count(prim_count), pct(prim_count, total_steps));
     eprintln!("  CtorCreate:  {:>10} ({:.1}%)", format_count(ctor_count), pct(ctor_count, total_steps));
@@ -179,11 +176,10 @@ fn run_trace(
     let result = interp.call_function(&args.entry, vec![input_value]);
 
     // Build trace
-    let output_value_id = interp.value_table.len() as u32;
-    interp.value_table.push(result.clone());
+    let output_value_id = interp.value_registry.register(&result);
 
     let trace = build_trace(
-        &interp,
+        &mut interp,
         ir_program_bytes,
         input_bytes,
         &result,

@@ -5,6 +5,7 @@ pub mod stack;
 pub mod value;
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use ir_trace_common::trace_types::{TraceStep, ValueId};
 
@@ -17,12 +18,45 @@ use value::Value;
 
 const MAX_CALL_DEPTH: usize = 10000;
 
+pub struct ValueRegistry {
+    pub table: Vec<Value>,
+    fingerprints: HashMap<u64, Vec<ValueId>>,
+}
+
+impl ValueRegistry {
+    pub fn new() -> Self {
+        Self {
+            table: Vec::new(),
+            fingerprints: HashMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, val: &Value) -> ValueId {
+        let fp = Self::fingerprint(val);
+        if let Some(candidates) = self.fingerprints.get(&fp) {
+            for &cid in candidates {
+                if self.table[cid as usize] == *val {
+                    return cid;
+                }
+            }
+        }
+        let id = self.table.len() as ValueId;
+        self.table.push(val.clone());
+        self.fingerprints.entry(fp).or_default().push(id);
+        id
+    }
+
+    fn fingerprint(val: &Value) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        val.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
 pub struct Interpreter {
     pub decls: HashMap<String, Decl>,
     pub trace_steps: Vec<TraceStep>,
-    pub value_table: Vec<Value>,
-    pub fn_name_table: Vec<String>,
-    fn_name_index: HashMap<String, u32>,
+    pub value_registry: ValueRegistry,
     call_depth: usize,
     pub extern_stubs: HashMap<String, Box<dyn Fn(&[Value]) -> Value>>,
 }
@@ -32,9 +66,7 @@ impl Interpreter {
         Interpreter {
             decls,
             trace_steps: Vec::new(),
-            value_table: Vec::new(),
-            fn_name_table: Vec::new(),
-            fn_name_index: HashMap::new(),
+            value_registry: ValueRegistry::new(),
             call_depth: 0,
             extern_stubs: HashMap::new(),
         }
@@ -46,22 +78,6 @@ impl Interpreter {
         f: Box<dyn Fn(&[Value]) -> Value>,
     ) {
         self.extern_stubs.insert(name.to_string(), f);
-    }
-
-    fn get_fn_id(&mut self, name: &str) -> u32 {
-        if let Some(id) = self.fn_name_index.get(name) {
-            return *id;
-        }
-        let id = self.fn_name_table.len() as u32;
-        self.fn_name_table.push(name.to_string());
-        self.fn_name_index.insert(name.to_string(), id);
-        id
-    }
-
-    fn register_value(&mut self, val: &Value) -> ValueId {
-        let id = self.value_table.len() as ValueId;
-        self.value_table.push(val.clone());
-        id
     }
 
     pub fn call_function(&mut self, name: &str, args: Vec<Value>) -> Value {
@@ -81,8 +97,8 @@ impl Interpreter {
         // Check for primitive operations first
         if let Some(prim_op) = lookup_primitive(name) {
             let result = call_primitive(&prim_op, args.clone());
-            let arg_ids: Vec<ValueId> = args.iter().map(|a| self.register_value(a)).collect();
-            let result_id = self.register_value(&result);
+            let arg_ids: Vec<ValueId> = args.iter().map(|a| self.value_registry.register(a)).collect();
+            let result_id = self.value_registry.register(&result);
             self.trace_steps.push(TraceStep::PrimResult {
                 op: prim_op,
                 args: arg_ids,
@@ -91,18 +107,9 @@ impl Interpreter {
             return result;
         }
 
-        // Check for extern stubs
+        // Check for extern stubs (trusted as axioms, not traced)
         if let Some(stub) = self.extern_stubs.get(name) {
-            let result = stub(&args);
-            let fn_id = self.get_fn_id(name);
-            let arg_ids: Vec<ValueId> = args.iter().map(|a| self.register_value(a)).collect();
-            let result_id = self.register_value(&result);
-            self.trace_steps.push(TraceStep::Call {
-                fn_id,
-                args: arg_ids,
-                result: result_id,
-            });
-            return result;
+            return stub(&args);
         }
 
         // Look up declaration
@@ -128,8 +135,8 @@ impl Interpreter {
                     if let Some(prim) = lookup_primitive(base_name) {
                         let result = call_primitive(&prim, args.clone());
                         let arg_ids: Vec<ValueId> =
-                            args.iter().map(|a| self.register_value(a)).collect();
-                        let result_id = self.register_value(&result);
+                            args.iter().map(|a| self.value_registry.register(a)).collect();
+                        let result_id = self.value_registry.register(&result);
                         self.trace_steps.push(TraceStep::PrimResult {
                             op: prim,
                             args: arg_ids,
@@ -156,10 +163,6 @@ impl Interpreter {
                 body,
                 ..
             } => {
-                let fn_id = self.get_fn_id(fn_name);
-                let arg_ids: Vec<ValueId> =
-                    args.iter().map(|a| self.register_value(a)).collect();
-
                 // Create a new call frame
                 let mut frame = CallFrame::new(fn_name.clone());
                 for (param, val) in params.iter().zip(args.iter()) {
@@ -167,15 +170,7 @@ impl Interpreter {
                 }
 
                 // Execute the body with continuation-based loop
-                let result = self.exec_with_continuations(&mut frame, body);
-
-                let result_id = self.register_value(&result);
-                self.trace_steps.push(TraceStep::Call {
-                    fn_id,
-                    args: arg_ids,
-                    result: result_id,
-                });
-                result
+                self.exec_with_continuations(&mut frame, body)
             }
         }
     }
@@ -188,7 +183,7 @@ impl Interpreter {
                 let mut executor = BodyExecutor {
                     frame,
                     trace_steps: &mut self.trace_steps,
-                    value_table: &mut self.value_table,
+                    value_registry: &mut self.value_registry,
                 };
                 executor.exec(&current_body)
             };
