@@ -135,14 +135,55 @@ pub fn verify_trace(trace: &Trace) {
                 assert!(*obj < vlen, "SetResult obj id out of range at step {}", i);
                 assert!(*val < vlen, "SetResult val id out of range at step {}", i);
                 assert!(*result < vlen, "SetResult result id out of range at step {}", i);
-                let mut expected = values[*obj as usize].clone();
-                expected.set_field(*idx as usize, values[*val as usize].clone());
-                assert_eq!(
-                    expected,
-                    values[*result as usize],
-                    "Set verification failed at step {}",
-                    i
-                );
+                // Verify `result` equals `obj` with field[idx] replaced by `val`,
+                // by reference comparison only — never cloning the (potentially
+                // large) object. Mirrors `Value::set_field` semantics, including
+                // its no-op behavior when `obj` is not an Object or `idx` is out
+                // of range.
+                let obj_val = &values[*obj as usize];
+                let new_field = &values[*val as usize];
+                let result_val = &values[*result as usize];
+                match (obj_val, result_val) {
+                    (
+                        Value::Object {
+                            tag: obj_tag,
+                            fields: obj_fields,
+                            scalars: obj_scalars,
+                        },
+                        Value::Object {
+                            tag: res_tag,
+                            fields: res_fields,
+                            scalars: res_scalars,
+                        },
+                    ) if (*idx as usize) < obj_fields.len() => {
+                        assert_eq!(obj_tag, res_tag, "Set tag mismatch at step {}", i);
+                        assert_eq!(
+                            obj_scalars, res_scalars,
+                            "Set scalars mismatch at step {}", i
+                        );
+                        assert_eq!(
+                            obj_fields.len(),
+                            res_fields.len(),
+                            "Set field count mismatch at step {}",
+                            i
+                        );
+                        let idx = *idx as usize;
+                        for j in 0..obj_fields.len() {
+                            let expected_field = if j == idx { new_field } else { &obj_fields[j] };
+                            assert_eq!(
+                                *expected_field, res_fields[j],
+                                "Set verification failed at step {} (field {})", i, j
+                            );
+                        }
+                    }
+                    // `set_field` was a no-op: `result` must equal `obj` unchanged.
+                    _ => {
+                        assert_eq!(
+                            obj_val, result_val,
+                            "Set verification failed at step {}", i
+                        );
+                    }
+                }
             }
         }
     }
