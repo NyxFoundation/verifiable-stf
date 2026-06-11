@@ -193,7 +193,11 @@ fn run_trace(
 
     eprintln!("Trace written: {} bytes", trace_bytes.len());
     eprintln!("  Steps: {}", trace.steps.len());
-    eprintln!("  Values: {}", trace.value_table.len());
+    eprintln!(
+        "  Values: {} total, {} seeded (leaf)",
+        trace.header.value_count,
+        trace.leaf_values.len()
+    );
 
     print_output_summary(&result);
 }

@@ -160,7 +160,13 @@ pub enum TraceStep {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trace {
     pub header: TraceHeader,
-    pub value_table: Vec<Value>,
+    /// Sparse seed values the guest cannot recompute from `steps` alone:
+    /// inputs, extern (crypto) results, and literal constants. Keyed by the
+    /// compacted ValueId. Every other value is rebuilt by re-executing the
+    /// steps in order, so the full value table is never serialized.
+    /// `header.value_count` is the full table size the guest allocates before
+    /// seeding these.
+    pub leaf_values: Vec<(ValueId, Value)>,
     pub steps: Vec<TraceStep>,
     pub output_value_id: ValueId,
 }

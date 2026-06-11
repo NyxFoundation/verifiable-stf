@@ -4,11 +4,9 @@ risc0_zkvm::guest::entry!(main);
 use risc0_zkvm::guest::env;
 use sha2::{Digest, Sha256};
 
-use ir_trace_common::primitives::eval_primitive;
-use ir_trace_common::trace_types::{Trace, TraceStep};
-use ir_trace_common::value::Value;
+use ir_trace_common::trace_types::Trace;
 
-mod verifier;
+mod executor;
 
 fn main() {
     // Read inputs from host
@@ -16,28 +14,29 @@ fn main() {
     let input: Vec<u8> = env::read();
     let trace_bytes: Vec<u8> = env::read();
 
-    // Deserialize trace
+    // Deserialize trace (steps + seed values only; the full value table is
+    // reconstructed by re-executing the steps below).
     let trace: Trace =
         bincode::deserialize(&trace_bytes).expect("Failed to deserialize trace");
 
-    // 1. Verify IR program hash matches
+    // 1. Bind the proof to the IR program.
     assert_eq!(
         trace.header.ir_program_hash, ir_program_hash,
         "IR program hash mismatch"
     );
 
-    // 2. Verify input hash matches
+    // 2. Bind the proof to the input.
     let input_hash = sha256(&input);
     assert_eq!(
         trace.header.input_hash, input_hash,
         "Input hash mismatch"
     );
 
-    // 3. Verify each trace step
-    verifier::verify_trace(&trace);
+    // 3. Reconstruct the value table by re-executing the trace.
+    let values = executor::execute_trace(&trace);
 
-    // 4. Commit the output
-    let output_value = &trace.value_table[trace.output_value_id as usize];
+    // 4. Commit the output, binding it to the recorded output hash.
+    let output_value = &values[trace.output_value_id as usize];
     let output_bytes = output_value.serialize_to_bytes();
     let output_hash = sha256(&output_bytes);
     assert_eq!(
